@@ -30,6 +30,7 @@ conda create -n travel python=3.11 -y
 2. Activate the environment
 
 ```bash
+conda init zsh
 conda activate travel
 ```
 
