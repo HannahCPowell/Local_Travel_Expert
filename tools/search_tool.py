@@ -7,8 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-exa = ExaSearchResults(max_results=10, api_key=os.getenv("EXA_API_KEY"))
-
 def google_local_search(query: str, location: str, language: str, country: str) -> List[Dict[str, Any]]:
     """Search Google via SerpAPI with dynamic location and language context.
     Args:
@@ -40,19 +38,19 @@ def google_local_search(query: str, location: str, language: str, country: str) 
 
 def exa_semantic_search(query: str) -> List[Dict[str,Any]]:
     """Use to discover local blogs, Reddit posts, and community discussions."""
-    search = exa(query)
-    results = search.get_dict()
-
-    # Return organic results cleanly
-    organic_results = results.get("organic_results", [])
-    for i, r in enumerate(organic_results, 1):
-        title = r.get("title", "Unknown"),
-        link = r.get("link", ""),
-        snippet = r.get("content", "").strip()
-        if len(snippet) >300:
+    exa = ExaSearchResults(exa_api_key=os.getenv("EXA_API_KEY"))
+    search = exa._run(num_results=10, query=query, text_contents_options= True)
+    formatted = []
+    for r in search.results[:5]:
+        snippet = (r.text or "").strip()
+        if len(snippet) > 300:
             snippet = snippet[:300].rsplit(" ", 1)[0] + "..."
+        formatted.append({
+            "title": r.title or "Unknown",
+            "link": r.url,
+            "snippet": snippet,
+        })
+    return formatted
 
-        organic_results.append(f"{i}. **{title}**\n {link}\n {snippet}")
-    return "\n\n".join(organic_results)
 
 all_search_tools = [google_local_search, exa_semantic_search]
