@@ -37,7 +37,9 @@ def google_local_search(query: str, location: str, language: str, country: str) 
 
 
 def exa_semantic_search(query: str) -> List[Dict[str,Any]]:
-    """Use to discover local blogs, Reddit posts, and community discussions. Args: query: The search terms or question."""
+    """Use to discover local blogs, Reddit posts, and community discussions. 
+    Args: 
+        query: The search terms or question."""
     exa = ExaSearchResults(exa_api_key=os.getenv("EXA_API_KEY"))
     search = exa._run(num_results=10, query=query, text_contents_options= True)
     formatted = []
