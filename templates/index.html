@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Local Travel Expert</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+    <div class="page-bg">
+        <div class="gradient-circle circle-1"></div>
+        <div class="gradient-circle circle-2"></div>
+        <div class="gradient-circle circle-3"></div>
+    </div>
+
+    <main class="app-container">
+
+        <section class="hero-section">
+            <h1>
+                Local Travel Expert with AI
+            </h1>
+
+            <p>
+                Plan Your Trip Like a Local with AI - Utilize a custom search engine that will search local websites in the native language to find you the best hidden gems anywhere in the world.
+            </p>
+        </section>
+
+        <section class="planner-card">
+
+            <div class="card-header">
+                <div>
+                    <h2>What are your travel details?</h2>
+                    <p>
+                        Necessary: The travel city, hotel name, and dates of arrival and departure.
+                    </p>
+                </div>
+
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    Online
+                </div>
+            </div>
+
+            <div class="input-area">
+                <textarea
+                    id="userInput"
+                    placeholder="I will be arriving in Tromso, Norway on Oct. 25 at 22:00 and leaving on Oct. 27 at 23:00. I will be staying in the Comfort Hotel Xpress."
+                ></textarea>
+
+                <button id="sendBtn" onclick="sendMessage()">
+                    <span id="btnText">Generate Plan</span>
+                    <span id="btnLoader" class="loader hidden"></span>
+                </button>
+            </div>
+
+            <div class="quick-prompts">
+                <button onclick="setPrompt('I will be arriving in Tromso, Norway on Oct. 25 at 22:00 and leaving on Oct. 27 at 23:00. I will be staying in the Comfort Hotel Xpress.')">
+                    Norway Trip
+                </button>
+
+                <button onclick="setPrompt('I will be arriving in Avilés, Spain on Aug. 8 at 22:00 and leaving on Aug. 14 at 23:00. I will be staying in the Hotel Rural La Llosa de Fombona.')">
+                    Spain Trip
+                </button>
+            </div>
+
+        </section>
+
+        <section id="resultSection" class="result-section hidden">
+
+            <div class="result-header">
+                <div>
+                    <h2>Your AI Travel Plan</h2>
+                    <p id="threadInfo">Thread ID: -</p>
+                </div>
+
+                <div class="result-actions">
+                    <button class="copy-btn" onclick="copyResult()">
+                        Copy
+                    </button>
+
+                    <button class="download-btn" onclick="downloadPDF()">
+                        Download PDF
+                    </button>
+                </div>
+            </div>
+
+            <div id="pdfContent" class="pdf-content">
+                <h1 class="pdf-title">AI Travel Plan</h1>
+                <div id="resultBox" class="result-box"></div>
+            </div>
+
+        </section>
+
+        <section id="errorBox" class="error-box hidden"></section>
+
+    </main>
+
+    <footer>
+        Built with FastAPI, LangGraph, OpenAI, PostgreSQL, ORS, Geoapify, SerpAPI, and Exa
+    </footer>
+
+
+    <!-- Your Custom JS -->
+    <script src="/static/script.js"></script>
+
+</body>
+</html>

@@ -87,25 +87,26 @@ def ors_routing(origin: tuple, destination: tuple) -> dict:
         "mode": "transit",  # Combines public transport + walking
         "apiKey": geoapify
     }
-    res = requests.get(url, params=params).json()
-    route = res["features"][0]["properties"]
-    # Extract readable human steps and ignore large geometry arrays
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    res = response.json()
+    if "features" in res and res["features"]:
+        route = res["features"][0]["properties"]
+    else:
+        print("API Response did not contain 'features':", res)
+
     simplified_legs = []
-    for leg in route.get("legs", []):
-        for step in leg.get("steps", []):
-            instruction = step.get("instruction", {}).get("text")
-            travel_mode = step.get("mode")
-            duration = round(step.get("time", 0) / 60, 1) # minutes
-            
-            simplified_legs.append({
-                "mode": travel_mode,
-                "duration_mins": duration,
-                "instruction": instruction
-            })     
+    leg = route['legs']
+    for step in leg[0]['steps']:
+        instruction = step['instruction']['text']
+        simplified_legs.append({
+            "instruction": instruction
+        })
+    travel_mode = route['mode']
+    duration = round((leg[0]['time']) / 60, 1)
+    route_details = {'origin': origin, 'destination': destination, 'travel_mode': travel_mode, 'duration': duration, 'instructions': simplified_legs}   
     return {
-        "total_time_mins": round(route.get("time", 0) / 60, 1),
-        "total_distance_meters": route.get("distance"),
-        "steps": simplified_legs
+        "routing": route_details
     }
 
 
