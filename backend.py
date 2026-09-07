@@ -12,8 +12,11 @@ from langchain_core.messages import (
     HumanMessage,
     AIMessage
 )
+from langchain.rate_limiters import InMemoryRateLimiter
+from langgraph.cache.memory import InMemoryCache
+from langchain_openrouter import ChatOpenRouter
 # from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_google_genai import ChatGoogleGenerativeAI
 from tools.search_tool import google_local_search, exa_semantic_search
 from tools.maps_tool import ors_isochrones, ors_routing, shapely_destination_in_zone, geoapify_verify_location, geoapify_map
 from dotenv import load_dotenv
@@ -36,12 +39,25 @@ def get_database_url():
     return database_url
 
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY is missing. Please add it to your .env file.")
+# GPT_API_KEY = os.getenv("GPT_API_KEY")
+# if not GPT_API_KEY:
+#     raise ValueError("GPT_API_KEY is missing. Please add it to your .env file.")
 
-# llm = ChatOpenAI(api_key= GEMINI_API_KEY, model="gpt-5.4-mini")
-llm = ChatGoogleGenerativeAI(api_key= GEMINI_API_KEY, model="gemini-3.8-flash")
+node_cache = InMemoryCache()
+
+rate_limiter = InMemoryRateLimiter(
+    requests_per_second=0.1,  # <-- Super slow! We can only make a request once every 10 seconds!!
+    check_every_n_seconds=0.1,  # Wake up every 100 ms to check whether allowed to make a request,
+    max_bucket_size=10,  # Controls the maximum burst size.
+)
+
+# llm = ChatOpenAI(api_key= GPT_API_KEY, model="gpt-5.4-mini")
+# llm = ChatGoogleGenerativeAI(api_key= GEMINI_API_KEY, model="gemini-3.8-flash")
+llm = ChatOpenRouter(
+    model="openrouter/free",
+    temperature=0.2,
+    rate_limiter= rate_limiter
+)
 
 class TravelState(TypedDict):
     messages: Annotated[list[AnyMessage], operator.add]
@@ -70,21 +86,19 @@ class TravelState(TypedDict):
 
 class TravelIntent(BaseModel):
     location: str = Field(description="Target city and country, e.g. 'Paris, France'")
-    language: str = Field(description="2-letter ISO language code for the target destination")
+    language: str = Field(description="2-letter ISO language code for the the primary national language of the destination")  ########################
     country: str = Field(description="2-letter ISO country code for the target destination")
     hotel_address: str = Field(description="The street address of the hotel.")
-    hotel_lat: float = Field(description="Latitude coordinate of hotel as float.")
-    hotel_lon: float = Field(description="Longitude coordinate of hotel as float.")
+    hotel_lat: float = Field(description="Latitude coordinate of hotel as float.")###############################################
+    hotel_lon: float = Field(description="Longitude coordinate of hotel as float.") ########################################
 
 llm_extractor = llm.with_structured_output(TravelIntent)
 
 def agent_parser(state: TravelState) -> Dict[str, Any]:
-    user_prompt = state["user_query"]  # e.g. "I'm traveling to Paris next month"
+    user_prompt = state["user_query"]
     
-    # LLM extracts metadata from user prompt
     extracted_data = llm_extractor.invoke(user_prompt) 
     
-    # Updates state so downstream agents have access
     return {
         "location": extracted_data.location,
         "language": extracted_data.language,
@@ -106,25 +120,24 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
 class LocationCoordinates(BaseModel):
     name: str = Field(description="Name of the zone, landmark, or business")
     address: str = Field(description="Address of the location")
-    lat: float = Field(description="Latitude of the location", default=69.647576)
-    lon: float = Field(description="Longitude of the location", default=18.95236)
+    lat: float = Field(description="Latitude of the location", default=69.647576) #####################################################
+    lon: float = Field(description="Longitude of the location", default=18.95236)##################################################
     summary: str = Field(description="Summary of what online users say about the location.")
-
 
 class ExtractedZones(BaseModel):
     zones: List[LocationCoordinates] = Field(description="List of top 3 zones with coordinates")
 
 def agent_planner(state: TravelState) -> Dict[str, Any]:
     user_query = state.get("user_query")
-    search_query = f"top 3 neighborhoods and zones of interest for {user_query}"
-    location = state.get("location")
+    city = state.get("location")
+    search_query = f"top 3 neighborhoods and zones of interest for {user_query}" ####################################################33
     language = state.get("language")
     country = state.get("country")
     
     exa_data = exa_semantic_search(search_query)
     google_data = google_local_search(
         query=search_query,
-        location=location,
+        location=city,
         language=language,
         country=country
     )
@@ -132,9 +145,9 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
     llm_zones = llm.with_structured_output(ExtractedZones)
     
     extraction_prompt = f"""
-    Analyze the following search results about '{user_query}' in '{location}'.
+    Analyze the following search results about '{user_query}' in '{city}'.
     Identify the top 3 distinct zones/neighborhoods of interest. 
-    Provide their names, estimated center addresses, and accurate latitude/longitude coordinates.
+    Provide their names, estimated center addresses, and accurate latitude/longitude coordinates. #########################################
     Provide a summary of why this location is interesting and what online users say about it.
 
     Exa Results: {exa_data}
@@ -171,33 +184,33 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
 
 
 class ExtractedSpots(BaseModel):
-    zones: List[LocationCoordinates] = Field(description="List of top locations with coordinates")
+    spots: List[LocationCoordinates] = Field(description="List of top locations with coordinates")
 
 llm_spots = llm.with_structured_output(ExtractedSpots)
 
 def agent_foodie(state: TravelState)-> Dict[str, Any]:
-    location = state.get("location")
+    city = state.get("location")
     language = state.get("language")
     country = state.get("country")
     plan_results = state.get("plan_results")
-    locations = [z["zone_name"] for z in plan_results if "zone_name" in z]
+    zone_names = [z["zone_name"] for z in plan_results if "zone_name" in z]
     foodie_places = []
-    for zone_name in locations:
+    for zone_name in zone_names:
         search_query = f"Top 3 bakeries and top 3 restaurants for {zone_name}. Give priority to local specialties and restaurants the locals love to hang out in."
         exa_data = exa_semantic_search(query=search_query)
-        serpa_data = google_local_search(query=search_query, location=location, language=language, country=country)
+        serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
         extraction_prompt = f"""
         Analyze the following search results about '{search_query}' in '{zone_name}'.
         Identify the distinct restaurants and bakeries of interest. 
         Provide their names, street addresses, and accurate latitude/longitude coordinates.
-        Provide a summary of why this location is interesting and what online users say about it.
+        Provide a summary of why this location is interesting and what online users say about it. #####################################################################################################
 
         Exa Results: {exa_data}
         Google Results: {serpa_data}
         """
         extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
-        for spot in extracted.zones:
-            verify_location = geoapify_verify_location(spot.name, location)
+        for spot in extracted.spots:
+            verify_location = geoapify_verify_location(spot.name, city)
             if verify_location is False:
                 continue
             lat = verify_location.get("lat")
@@ -217,26 +230,26 @@ def agent_foodie(state: TravelState)-> Dict[str, Any]:
 
 
 def agent_events(state: TravelState)-> Dict[str, Any]:
-    location = state.get("location")
+    city = state.get("location")
     language = state.get("language")
     country = state.get("country")
-    plan_results = state.get("plan_results")
+    plan_results = state.get("plan_results") ####################################################################### DATES ###############################3
     events_places = []
-    search_query = f"Top 5 events for {location}. Give priority to local cultural events, festivals, local live music, and free events."
+    search_query = f"Top 5 events for {city}. Give priority to local cultural events, festivals, local live music, and free events." ##########################################################
     exa_data = exa_semantic_search(query=search_query)
-    serpa_data = google_local_search(query=search_query, location=location, language=language, country=country)
+    serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
     extraction_prompt = f"""
-    Analyze the following search results about '{search_query}' in '{location}'.
+    Analyze the following search results about '{search_query}' in '{city}'.
     Identify the distinct events of interest. 
     Provide their names, street addresses, and accurate latitude/longitude coordinates.
-    Provide a summary of why this location is interesting and what online users say about it.
+    Provide a summary of why this location is interesting and what online users say about it.  ######################################################################
 
     Exa Results: {exa_data}
     Google Results: {serpa_data}
     """
     extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
-    for spot in extracted.zones:
-        verify_location = geoapify_verify_location(spot.name, location)
+    for spot in extracted.spots:
+        verify_location = geoapify_verify_location(spot.name, city)
         if verify_location is False:
             continue
         lat = verify_location.get("lat")
@@ -260,28 +273,28 @@ def agent_events(state: TravelState)-> Dict[str, Any]:
 llm_spots = llm.with_structured_output(ExtractedSpots)
 
 def agent_sights(state: TravelState)-> Dict[str, Any]:
-    location = state.get("location")
+    city = state.get("location")
     language = state.get("language")
     country = state.get("country")
     plan_results = state.get("plan_results")
-    locations = [z["zone_name"] for z in plan_results if "zone_name" in z]
+    zone_names = [z["zone_name"] for z in plan_results if "zone_name" in z]
     sights_places = []
-    for zone_name in locations:
-        search_query = f"Top 5 beautiful or cultural sights for {zone_name}. Include beautiful streets to walk down, or beautiful places to sit."
+    for zone_name in zone_names:
+        search_query = f"Top 5 beautiful or cultural sights for {zone_name}. Include beautiful streets to walk down, or beautiful places to sit." ######################################33
         exa_data = exa_semantic_search(query=search_query)
-        serpa_data = google_local_search(query=search_query, location=location, language=language, country=country)
+        serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
         extraction_prompt = f"""
         Analyze the following search results about '{search_query}' in '{zone_name}'.
         Identify the distinct sights of interest. 
         Provide their names, street addresses, and accurate latitude/longitude coordinates.
-        Provide a summary of why this location is interesting and what online users say about it.
+        Provide a summary of why this location is interesting and what online users say about it. #############################################################################
 
         Exa Results: {exa_data}
         Google Results: {serpa_data}
         """
         extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
-        for spot in extracted.zones:
-            verify_location = geoapify_verify_location(spot.name, location)
+        for spot in extracted.spots:
+            verify_location = geoapify_verify_location(spot.name, city)
             if verify_location is False:
                 continue
             lat = verify_location.get("lat")
@@ -309,15 +322,15 @@ def agent_sights(state: TravelState)-> Dict[str, Any]:
 
 class SpotDetails(BaseModel):
     name: str = Field(description="Name of the zone, landmark, or business")
-    address: str = Field(description="Address of the location")
-    lat: float = Field(description= "The latitude coordinate of the address given as a float.", default = 69.647576)
-    lon: float = Field(description= "The longitude coordinate of the address given as a float.", default = 18.95236)
+    address: str = Field(description="Address of the location") #################################################################################
+    lat: float = Field(description= "The latitude coordinate of the address given as a float.", default = 69.647576) #########################################
+    lon: float = Field(description= "The longitude coordinate of the address given as a float.", default = 18.95236)#############################################
     opening_hours: str = Field(description="Hours of operation for the location.")
     avg_time_spent: str = Field(description="Average time spent at location.")
     best_time: str = Field(description="Best time of day to visit.")
     type:  str = Field(description="Type of location (cafe, restaurant, event, sight)")
-    recommender_notes: str = Field(description="Summary of what online users say about this location.")
-    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.")
+    recommender_notes: str = Field(description="Summary of what online users say about this location.") #######################################################
+    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.")###########################
 
 class Spots_Detailed(BaseModel):
     spots_interest: List[SpotDetails] = Field(description="List of locations of interest, with important planning information.")
@@ -326,13 +339,13 @@ class ItineraryItems(BaseModel):
     day: int = Field(description="Day of the trip")
     time_slot: str = Field(description="The approximate time (in military hours) when this item will be visited")
     name: str = Field(description="Name of the zone, landmark, or business")
-    address: str = Field(description="Address of the location")
-    recommender_notes: str = Field(description="Verbatim summary from the recommender agents")
+    address: str = Field(description="Address of the location") ###############################################################################
+    recommender_notes: str = Field(description="Verbatim summary from the recommender agents") ###########################################################3
     type: str = Field(description="Type of location (cafe, restaurant, event, sight)")
-    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.")
-    transit_next_mode: str = Field(description="The mode of transport used to reach the next destination.")
-    transit_next_directions: str = Field(description="The transit directions to reach the next destination.")
-    transit_next_duration: int = Field(description="The estimated transit time to reach the next destination.")
+    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.") ###########################################
+    transit_next_mode: str = Field(description="The mode of transport used to reach the next destination.") #################################################
+    transit_next_directions: str = Field(description="The transit directions to reach the next destination.")#####################################################
+    transit_next_duration: int = Field(description="The estimated transit time to reach the next destination.")#################################################################
 
 
 class Itinerary(BaseModel):
@@ -355,7 +368,7 @@ def agent_itinerary(state: TravelState) -> Dict[str, Any]:
     Identify the opening hours, average time spent, and best time of day to visit.
     Take note of which zone they belong to and group activities in each zone together.
     Use {plan_results}, {event_results}, {foodie_results}, {sights_results}, to provide the recommender notes about each location (verbatim).
-    Determine which type of location it is (cafe, restaurant, event, sight).
+    Determine which type of location it is (cafe, restaurant, event, sight). ###############################################################################################3
     """
     extracted: Spots_Detailed = llm_items.invoke(extraction_prompt)
 
@@ -379,7 +392,7 @@ def agent_itinerary(state: TravelState) -> Dict[str, Any]:
             routes.append(route)
 
     extraction_prompt_itinerary = f"""
-    Determine an optimized itinerary for the vacation defined in {user_query}. 
+    Determine an optimized itinerary for the vacation defined in {user_query}.  #######################################################################################################
     Start and end each day in the hotel at {hotel_address}.
     Use the locations of interest in {extracted.model_dump()} along with their hours of operation, best times to visit, and the zones they belong to. 
     Take note of transit times {routes} between zones and independent destinations.
@@ -482,8 +495,7 @@ _conn = psycopg.connect(
 checkpointer = PostgresSaver(_conn)
 checkpointer.setup()
 
-travel_graph = graph.compile(checkpointer=checkpointer)
-
+travel_graph = graph.compile(checkpointer=checkpointer, cache=node_cache)
 
 
 # # =========================
