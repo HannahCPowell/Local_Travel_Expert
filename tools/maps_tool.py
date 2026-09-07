@@ -1,31 +1,59 @@
 from langchain_core.tools import tool
 import openrouteservice
 import requests
-from shapely.geometry import Point, shape
+# from shapely.geometry import Point, shape
 from dotenv import load_dotenv
 import os
+import warnings
 
 load_dotenv()
 
 ors_client = openrouteservice.Client(key=os.getenv("ORS_API_KEY"))
 geoapify = os.getenv("GEOAPIFY_KEY")
 
+def ors_geocode(address: str, country: str, center_lat: float = 0 , center_lon: float = 0) -> tuple:
+    """ Converts an address to a set of latitude and longitude coordinates. 
+        Args:
+            address: The string address of the location.
+            country: The country of interest as a 2 letter string.
+            center_lat: The latitude coordinate of the chosen central point for a search radius expressed as a float.
+            center_lon: The longitude coordinate of the chosen central point for a search radius expressed as a float.
+        Returns: Tuple of the coordinates for the location searched.
+    """
+    if center_lat > 0 and center_lon > 0:
+        res = ors_client.pelias_search(text = address, 
+                                            country = country, 
+                                            focus_point=(center_lat, center_lon), 
+                                            size = 1)
+        response_flipped = res['features'][0]['geometry']['coordinates']
+        response = ((response_flipped[1],response_flipped[0]))
+    elif address and country:
+        res = ors_client.pelias_search(text = address, 
+                                            country = country,
+                                            size = 1)
+        response_flipped = res['features'][0]['geometry']['coordinates']
+        response = ((response_flipped[1],response_flipped[0]))
+    else:
+        warnings.warn(f"Something is missing for ors_geocode - check inputs : address - {address}, country - {country}, lat - {center_lat}, lon - {center_lon}")
+        response = (0,0)
+
+    return response
 
 def ors_isochrones(lat:float, lon:float, time_in_seconds: int = 1800)-> dict:
- """Calculates a walking polygon area within a given travel time limit.
+    """Calculates a walking polygon area within a given travel time limit.
     Args:
         lat: The latitude of the location as a float
         lon: The longitude of the location as a float
         time_in_seconds: The allowed walking time in integer seconds. Default is 1800
     Returns: GeoJSON dictionary representing the reachable walking zone."""
- response = ors_client.isochrones(
+    response = ors_client.isochrones(
         locations=[[lon, lat]],
         profile='foot-walking',
         range=[time_in_seconds],
         range_type='time'
     )
- polygon_coordinates = response['features'][0]['geometry']['coordinates']
- return {
+    polygon_coordinates = response['features'][0]['geometry']['coordinates']
+    return {
         "type": "Polygon",
         "coordinates": polygon_coordinates
     }

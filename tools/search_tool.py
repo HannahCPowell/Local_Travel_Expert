@@ -32,7 +32,7 @@ def google_local_search(query: str, location: str, language: str, country: str) 
             "link": r.get("link"),
             "snippet": r.get("snippet")
         }
-        for r in organic_results[:5] 
+        for r in organic_results[:3]
         ]
 
 
@@ -41,9 +41,9 @@ def exa_semantic_search(query: str) -> List[Dict[str,Any]]:
     Args: 
         query: The search terms or question."""
     exa = ExaSearchResults(exa_api_key=os.getenv("EXA_API_KEY"))
-    search = exa._run(num_results=10, query=query, text_contents_options= True)
+    search = exa._run(num_results=3, query=query, text_contents_options= True)
     formatted = []
-    for r in search.results[:5]:
+    for r in search.results[:3]:
         snippet = (r.text or "").strip()
         if len(snippet) > 300:
             snippet = snippet[:300].rsplit(" ", 1)[0] + "..."
@@ -53,6 +53,3 @@ def exa_semantic_search(query: str) -> List[Dict[str,Any]]:
             "snippet": snippet,
         })
     return formatted
-
-
-all_search_tools = [google_local_search, exa_semantic_search]
