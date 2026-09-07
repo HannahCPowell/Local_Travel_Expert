@@ -1,4 +1,5 @@
 import os
+import warnings
 from typing import TypedDict, Annotated, List, Dict, Any, Union, Optional
 import operator
 from pydantic import Field, BaseModel
@@ -15,10 +16,8 @@ from langchain_core.messages import (
 from langchain.rate_limiters import InMemoryRateLimiter
 from langgraph.cache.memory import InMemoryCache
 from langchain_openrouter import ChatOpenRouter
-# from langchain_openai import ChatOpenAI
-# from langchain_google_genai import ChatGoogleGenerativeAI
 from tools.search_tool import google_local_search, exa_semantic_search
-from tools.maps_tool import ors_isochrones, ors_routing, shapely_destination_in_zone, geoapify_verify_location, geoapify_map
+from tools.maps_tool import ors_isochrones, ors_routing, shapely_destination_in_zone, geoapify_verify_location, geoapify_map, ors_geocode
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,10 +38,6 @@ def get_database_url():
     return database_url
 
 
-# GPT_API_KEY = os.getenv("GPT_API_KEY")
-# if not GPT_API_KEY:
-#     raise ValueError("GPT_API_KEY is missing. Please add it to your .env file.")
-
 node_cache = InMemoryCache()
 
 rate_limiter = InMemoryRateLimiter(
@@ -51,8 +46,6 @@ rate_limiter = InMemoryRateLimiter(
     max_bucket_size=10,  # Controls the maximum burst size.
 )
 
-# llm = ChatOpenAI(api_key= GPT_API_KEY, model="gpt-5.4-mini")
-# llm = ChatGoogleGenerativeAI(api_key= GEMINI_API_KEY, model="gemini-3.8-flash")
 llm = ChatOpenRouter(
     model="openrouter/free",
     temperature=0.2,
@@ -85,27 +78,36 @@ class TravelState(TypedDict):
 
 
 class TravelIntent(BaseModel):
-    location: str = Field(description="Target city and country, e.g. 'Paris, France'")
-    language: str = Field(description="2-letter ISO language code for the the primary national language of the destination")  ########################
+    city: str = Field(description="Name of the target city e.g. 'Paris'")
+    language: str = Field(description="2-letter ISO language code for the the primary national language of the destination")
     country: str = Field(description="2-letter ISO country code for the target destination")
     hotel_address: str = Field(description="The street address of the hotel.")
-    hotel_lat: float = Field(description="Latitude coordinate of hotel as float.")###############################################
-    hotel_lon: float = Field(description="Longitude coordinate of hotel as float.") ########################################
 
 llm_extractor = llm.with_structured_output(TravelIntent)
 
 def agent_parser(state: TravelState) -> Dict[str, Any]:
-    user_prompt = state["user_query"]
+    user_prompt = state.get("user_query")
+
+    extraction_prompt = f"""
+    From the user input ({user_prompt}) infer the 2-letter ISO country code for the target destination along with the target city.
+    From the country, infer the primary national language and determine the 2-letter ISO language code for this.
+    Finally, determine the hotel name given and return its exact street address.
+    """
     
-    extracted_data = llm_extractor.invoke(user_prompt) 
+    extracted_data = llm_extractor.invoke(extraction_prompt) 
+
+    hotel_coordinates = ors_geocode(address = extracted_data.hotel_address, country = extracted_data.country)
+
+    if hotel_coordinates[0] or hotel_coordinates[1] <1 :
+        warnings.warn(f"Hotel coordinates could not be generated. Coordinates : {hotel_coordinates}, extracted : {extracted_data}")
     
     return {
         "location": extracted_data.location,
         "language": extracted_data.language,
         "country": extracted_data.country,
         "hotel_address": extracted_data.hotel_address,
-        "hotel_lat": extracted_data.hotel_lat,
-        "hotel_lon": extracted_data.hotel_lon,
+        "hotel_lat": hotel_coordinates[0],
+        "hotel_lon": hotel_coordinates[1],
         "llm_calls": 1
     }
 
@@ -120,8 +122,6 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
 class LocationCoordinates(BaseModel):
     name: str = Field(description="Name of the zone, landmark, or business")
     address: str = Field(description="Address of the location")
-    lat: float = Field(description="Latitude of the location", default=69.647576) #####################################################
-    lon: float = Field(description="Longitude of the location", default=18.95236)##################################################
     summary: str = Field(description="Summary of what online users say about the location.")
 
 class ExtractedZones(BaseModel):
@@ -130,9 +130,11 @@ class ExtractedZones(BaseModel):
 def agent_planner(state: TravelState) -> Dict[str, Any]:
     user_query = state.get("user_query")
     city = state.get("location")
-    search_query = f"top 3 neighborhoods and zones of interest for {user_query}" ####################################################33
+    search_query = f"top neighborhoods and zones of interest for {user_query}"
     language = state.get("language")
     country = state.get("country")
+    hotel_lat = state.get("hotel_lat")
+    hotel_lon = state.get("hotel_lon")
     
     exa_data = exa_semantic_search(search_query)
     google_data = google_local_search(
@@ -147,23 +149,27 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
     extraction_prompt = f"""
     Analyze the following search results about '{user_query}' in '{city}'.
     Identify the top 3 distinct zones/neighborhoods of interest. 
-    Provide their names, estimated center addresses, and accurate latitude/longitude coordinates. #########################################
+    Provide their names, estimated center addresses. Provide the estimated center address as a street address.
     Provide a summary of why this location is interesting and what online users say about it.
 
     Exa Results: {exa_data}
     Google Results: {google_data}
     """
-    extracted: ExtractedZones = llm_zones.invoke(extraction_prompt)
+    extracted = llm_zones.invoke(extraction_prompt)
 
     zone_isochrones = []
-    for zone in extracted.zones:
+    for zone in extracted.zones[:3]:
+        if hotel_lat and hotel_lon >0 :
+            zone_coordinates = ors_geocode(address = zone.address, country = country, center_lat= hotel_lat, center_lon= hotel_lon)
+        else:
+            zone_coordinates = ors_geocode(address = zone.address, country = country)
         # Calculate 30-min walking isochrome (1800 seconds)
-        geo_polygon = ors_isochrones(lat=zone.lat, lon=zone.lon, time_in_seconds=1800)
+        geo_polygon = ors_isochrones(lat=zone_coordinates[0], lon=zone_coordinates[1], time_in_seconds=1800)
         
         zone_isochrones.append({
             "zone_name": zone.name,
             "address": zone.address,
-            "coordinates": {"lat": zone.lat, "lon": zone.lon},
+            "coordinates": {"lat": zone_coordinates[0], "lon": zone_coordinates[1]},
             "isochrome": geo_polygon
         })
 
