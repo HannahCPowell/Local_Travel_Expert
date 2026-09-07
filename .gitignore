@@ -217,5 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Personaal files
+# Personal files
 .IP Addresses and Rate Limits in AI Web Scrapers.pdf
+.simple_backend.py
+.Fake_state_TravelState.txt

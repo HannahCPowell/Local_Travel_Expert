@@ -1,0 +1,23 @@
+messages: Annotated[list[AnyMessage], operator.add]
+user_query: str
+location: "Tromsø, Norway"
+language: "no"
+country: "NO"
+hotel_address: "Grønnegata 35, 9008 Tromsø, Norway"
+hotel_lat: 69.647576 
+hotel_lon: 18.952360
+plan_results: [{"name": "Sentrum", "address": "Grønnegata 83, 9008 Tromsø, Norway", "lat": 69.650784, "lon": 18.955926,"summary": "City center, locals say it is full of life."}]
+foodie_results: [{"name": "Risø mat og kaffebar", "address": "Strandgata 32, 9008 Tromsø, Norway", "lat": 69.648002, "lon": 18.955795, "summary": "Historic cafe with amazing fresh bread."}]
+events_results: [{"name": "INSOMNIA", "address": "Storgata 6, 9008 Tromsø, Norway", "lat": 69.645983, "lon": 18.950776, "summary": "EDM festival in city center. Tickets range from 550 to 1150kr."}]
+sights_results: [{"name": "Troll Museum", "address": "Kaigata 3, 9008 Tromsø, Norway", "lat": 69.648545, "lon": 18.960387, "summary": "The only museum dedicated to understanding Trolls and their history. A must-see!"}]
+itinerary_results: [{"day": 0, "time_slot": "9:00 - 11:00", "name": "Risø mat og kaffebar", "address": "Strandgata 32, 9008 Tromsø, Norway", 
+                     "recommender_notes": "Historic cafe with amazing fresh bread.", "type": "cafe", "zone": "Sentrum", 
+                     "transit_next_mode": "walking", "transit_next_directions": "Walk along Strandgata. Turn left on Kaigata. The destination will be on your right.", "transit_next_duration": 5}, 
+                     {"day": 0, "time_slot": "12:00 - 14:00", "name": "Troll Museum", "address": "Kaigata 3, 9008 Tromsø, Norway", 
+                     "recommender_notes": "The only museum dedicated to understanding Trolls and their history. A must-see!", "type": "museum", "zone": "Sentrum", 
+                     "transit_next_mode": "walking", "transit_next_directions": "Walk along Kaigata. Turn left on Storgata. The destination will be on your right.", "transit_next_duration": 10}, 
+                     {"day": 0, "time_slot": "15:00 - 20:00", "name": "INSOMNIA", "address": "Storgata 6, 9008 Tromsø, Norway", 
+                     "recommender_notes": "EDM festival in city center. Tickets range from 550 to 1150kr.", "type": "event", "zone": "Sentrum", 
+                     "transit_next_mode": "walking", "transit_next_directions": "Walk along Storgata. Turn left on Grønnegata. The destination will be on your right.", "transit_next_duration": 10}]
+final_results:[f"Find the annotated map here: \n https://www.google.com/maps \n\n Local Travel Expert Message: \n\n Your first stop is the historic cafe Risø mat og kaffebar. Next you will visit the one and only Troll Museum. Finally, you will end your first day at INSOMNIA EDM festival."]
+llm_calls: 7
