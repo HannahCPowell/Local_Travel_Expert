@@ -61,6 +61,7 @@ class TravelState(TypedDict):
     hotel_address: str
     hotel_lat: float
     hotel_lon: float
+    dates: str
     plan_results: Dict[str, Any]
     foodie_results: Dict[str, Any]
     events_results: Dict[str, Any]
@@ -81,6 +82,7 @@ class TravelIntent(BaseModel):
     city: str = Field(description="Name of the target city e.g. 'Paris'")
     language: str = Field(description="2-letter ISO language code for the the primary national language of the destination")
     country: str = Field(description="2-letter ISO country code for the target destination")
+    dates: str = Field(description="The dates and times of arrival and departure as provided.")
     hotel_address: str = Field(description="The street address of the hotel.")
 
 llm_extractor = llm.with_structured_output(TravelIntent)
@@ -91,6 +93,7 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
     extraction_prompt = f"""
     From the user input ({user_prompt}) infer the 2-letter ISO country code for the target destination along with the target city.
     From the country, infer the primary national language and determine the 2-letter ISO language code for this.
+    Determine the dates and times of travel with as much detail as is provided.
     Finally, determine the hotel name given and return its exact street address.
     """
     
@@ -108,6 +111,7 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
         "hotel_address": extracted_data.hotel_address,
         "hotel_lat": hotel_coordinates[0],
         "hotel_lon": hotel_coordinates[1],
+        "dates": extracted_data.dates,
         "llm_calls": 1
     }
 
@@ -202,20 +206,33 @@ def agent_foodie(state: TravelState)-> Dict[str, Any]:
     zone_names = [z["zone_name"] for z in plan_results if "zone_name" in z]
     foodie_places = []
     for zone_name in zone_names:
-        search_query = f"Top 3 bakeries and top 3 restaurants for {zone_name}. Give priority to local specialties and restaurants the locals love to hang out in."
+        search_query = f"Top 3 bakeries and top 3 restaurants for {zone_name}, {city}, {country}. Give priority to local specialties and restaurants the locals love to hang out in."
         exa_data = exa_semantic_search(query=search_query)
         serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
         extraction_prompt = f"""
-        Analyze the following search results about '{search_query}' in '{zone_name}'.
+        Analyze the following search results about eateries in '{city}','{country}'.
         Identify the distinct restaurants and bakeries of interest. 
-        Provide their names, street addresses, and accurate latitude/longitude coordinates.
-        Provide a summary of why this location is interesting and what online users say about it. #####################################################################################################
+        Provide their names and exact street addresses.
+        Provide a summary of why this location is interesting and what online users say about it.
 
         Exa Results: {exa_data}
         Google Results: {serpa_data}
         """
-        extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
+        extracted = llm_spots.invoke(extraction_prompt)
+
+        seen_names = set()
+        unique_spots = []
+
         for spot in extracted.spots:
+                normalized_name = spot.name.strip().lower()
+    
+                if normalized_name not in seen_names:
+                    seen_names.add(normalized_name)
+                    unique_spots.append(zone)
+
+        extracted.spots = unique_spots
+
+        for spot in extracted.spots[:10]:
             verify_location = geoapify_verify_location(spot.name, city)
             if verify_location is False:
                 continue
@@ -239,22 +256,36 @@ def agent_events(state: TravelState)-> Dict[str, Any]:
     city = state.get("location")
     language = state.get("language")
     country = state.get("country")
-    plan_results = state.get("plan_results") ####################################################################### DATES ###############################3
+    dates = state.get("dates")
+    plan_results = state.get("plan_results")
     events_places = []
-    search_query = f"Top 5 events for {city}. Give priority to local cultural events, festivals, local live music, and free events." ##########################################################
+    search_query = f"Top 5 events for {city} during this time interval: {dates}. Give priority to local cultural events, festivals, local live music, and free events."
     exa_data = exa_semantic_search(query=search_query)
     serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
     extraction_prompt = f"""
-    Analyze the following search results about '{search_query}' in '{city}'.
+    Analyze the following search results about '{search_query}' in '{city}' during time window '{dates}'.
     Identify the distinct events of interest. 
-    Provide their names, street addresses, and accurate latitude/longitude coordinates.
-    Provide a summary of why this location is interesting and what online users say about it.  ######################################################################
+    Provide their names and exact street addresses.
+    Provide a summary of why this event is interesting and any other important information.
 
     Exa Results: {exa_data}
     Google Results: {serpa_data}
     """
-    extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
+    extracted = llm_spots.invoke(extraction_prompt)
+
+    seen_names = set()
+    unique_spots = []
+
     for spot in extracted.spots:
+            normalized_name = spot.name.strip().lower()
+
+            if normalized_name not in seen_names:
+                seen_names.add(normalized_name)
+                unique_spots.append(zone)
+
+    extracted.spots = unique_spots
+
+    for spot in extracted.spots[:5]:
         verify_location = geoapify_verify_location(spot.name, city)
         if verify_location is False:
             continue
@@ -275,9 +306,6 @@ def agent_events(state: TravelState)-> Dict[str, Any]:
         ],
         "llm_calls": 1}
 
-
-llm_spots = llm.with_structured_output(ExtractedSpots)
-
 def agent_sights(state: TravelState)-> Dict[str, Any]:
     city = state.get("location")
     language = state.get("language")
@@ -286,20 +314,33 @@ def agent_sights(state: TravelState)-> Dict[str, Any]:
     zone_names = [z["zone_name"] for z in plan_results if "zone_name" in z]
     sights_places = []
     for zone_name in zone_names:
-        search_query = f"Top 5 beautiful or cultural sights for {zone_name}. Include beautiful streets to walk down, or beautiful places to sit." ######################################33
+        search_query = f"Top 3 beautiful or cultural sights for {zone_name}, {city}, {country}. Include beautiful streets to walk down, or beautiful places to sit."
         exa_data = exa_semantic_search(query=search_query)
         serpa_data = google_local_search(query=search_query, location=city, language=language, country=country)
         extraction_prompt = f"""
-        Analyze the following search results about '{search_query}' in '{zone_name}'.
+        Analyze the following search results about sightseeing destinations in '{zone_name}', {city}, {country}.
         Identify the distinct sights of interest. 
-        Provide their names, street addresses, and accurate latitude/longitude coordinates.
-        Provide a summary of why this location is interesting and what online users say about it. #############################################################################
+        Provide their names and exact street addresses.
+        Provide a summary of why this location is interesting and what online users say about it.
 
         Exa Results: {exa_data}
         Google Results: {serpa_data}
         """
-        extracted: ExtractedSpots = llm_spots.invoke(extraction_prompt)
+        extracted = llm_spots.invoke(extraction_prompt)
+
+        seen_names = set()
+        unique_spots = []
+
         for spot in extracted.spots:
+                normalized_name = spot.name.strip().lower()
+    
+                if normalized_name not in seen_names:
+                    seen_names.add(normalized_name)
+                    unique_spots.append(zone)
+
+        extracted.spots = unique_spots
+
+        for spot in extracted.spots[:5]:
             verify_location = geoapify_verify_location(spot.name, city)
             if verify_location is False:
                 continue
