@@ -181,3 +181,13 @@ document.addEventListener("keydown", function(event) {
         sendMessage();
     }
 });
+
+function startNewSession() {
+    localStorage.removeItem("travel_thread_id");
+    currentThreadId = null;
+    
+    // Clear the UI
+    document.getElementById("userInput").value = "";
+    document.getElementById("resultSection").classList.add("hidden");
+    hideError();
+}
