@@ -1,7 +1,7 @@
 from langchain_core.tools import tool
 import openrouteservice
 import requests
-# from shapely.geometry import Point, shape
+from shapely.geometry import Point, shape
 from dotenv import load_dotenv
 import os
 import warnings
@@ -116,23 +116,27 @@ def ors_routing(origin: tuple, destination: tuple) -> dict:
         "apiKey": geoapify
     }
     response = requests.get(url, params=params)
-    response.raise_for_status()
     res = response.json()
     if "features" in res and res["features"]:
         route = res["features"][0]["properties"]
     else:
-        print("API Response did not contain 'features':", res)
+        warnings.warn(f"API Response did not contain 'features': {res}")
+        route = {}
 
     simplified_legs = []
-    leg = route['legs']
-    for step in leg[0]['steps']:
-        instruction = step['instruction']['text']
-        simplified_legs.append({
-            "instruction": instruction
-        })
-    travel_mode = route['mode']
-    duration = round((leg[0]['time']) / 60, 1)
-    route_details = {'origin': origin, 'destination': destination, 'travel_mode': travel_mode, 'duration': duration, 'instructions': simplified_legs}   
+    if "legs" in route and route['legs']:
+        leg = route['legs']
+        for step in leg[0]['steps']:
+            instruction = step['instruction']['text']
+            simplified_legs.append({
+                "instruction": instruction
+            })
+        travel_mode = route['mode']
+        duration = round((leg[0]['time']) / 60, 1)
+        route_details = {'origin': origin, 'destination': destination, 'travel_mode': travel_mode, 'duration': duration, 'instructions': simplified_legs}   
+    else:
+        route_details = {}
+        warnings.warn(f"Route {origin} to {destination} could not be determined.")
     return {
         "routing": route_details
     }

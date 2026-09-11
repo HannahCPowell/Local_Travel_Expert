@@ -103,9 +103,10 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
 
     if hotel_coordinates[0] or hotel_coordinates[1] <1 :
         warnings.warn(f"Hotel coordinates could not be generated. Coordinates : {hotel_coordinates}, extracted : {extracted_data}")
-    
+
+    warnings.warn(f"Agent Parser : \n Hotel coordinates are {hotel_coordinates}. \n Extracted data: \n {extracted_data}.")
     return {
-        "location": extracted_data.location,
+        "location": extracted_data.city,
         "language": extracted_data.language,
         "country": extracted_data.country,
         "hotel_address": extracted_data.hotel_address,
@@ -134,9 +135,9 @@ class ExtractedZones(BaseModel):
 def agent_planner(state: TravelState) -> Dict[str, Any]:
     user_query = state.get("user_query")
     city = state.get("location")
-    search_query = f"top neighborhoods and zones of interest for {user_query}"
-    language = state.get("language")
     country = state.get("country")
+    search_query = f"top neighborhoods and zones of interest for {city}, {country}"
+    language = state.get("language")
     hotel_lat = state.get("hotel_lat")
     hotel_lon = state.get("hotel_lon")
     
@@ -151,7 +152,7 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
     llm_zones = llm.with_structured_output(ExtractedZones)
     
     extraction_prompt = f"""
-    Analyze the following search results about '{user_query}' in '{city}'.
+    Analyze the following search results about places in {city}, {country}.
     Identify the top 3 distinct zones/neighborhoods of interest. 
     Provide their names, estimated center addresses. Provide the estimated center address as a street address.
     Provide a summary of why this location is interesting and what online users say about it.
@@ -177,6 +178,7 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
             "isochrome": geo_polygon
         })
 
+    warnings.warn(f"Agent Planner : \n \n Only first three results are kept from the following : {extracted}.")
     return {
         "plan_results": zone_isochrones,
         "messages": [
@@ -194,7 +196,7 @@ def agent_planner(state: TravelState) -> Dict[str, Any]:
 
 
 class ExtractedSpots(BaseModel):
-    spots: List[LocationCoordinates] = Field(description="List of top locations with coordinates")
+    spots: List[LocationCoordinates] = Field(description="List of top locations")
 
 llm_spots = llm.with_structured_output(ExtractedSpots)
 
@@ -220,30 +222,39 @@ def agent_foodie(state: TravelState)-> Dict[str, Any]:
         """
         extracted = llm_spots.invoke(extraction_prompt)
 
-        seen_names = set()
-        unique_spots = []
+        if extracted is None:
+            warnings.warn(f"LLM at Agent Foodie failed to return structured output matching the ExtractedSpots schema. No eateries gathered for zone {zone_name}")
+            continue
+        else:
+            seen_names = set()
+            unique_spots = []
 
-        for spot in extracted.spots:
-                normalized_name = spot.name.strip().lower()
-    
-                if normalized_name not in seen_names:
-                    seen_names.add(normalized_name)
-                    unique_spots.append(zone)
+            for spot in extracted.spots:
+                    normalized_name = spot.name.strip().lower()
+        
+                    if normalized_name not in seen_names:
+                        seen_names.add(normalized_name)
+                        unique_spots.append(spot)
 
-        extracted.spots = unique_spots
+            extracted.spots = unique_spots
 
-        for spot in extracted.spots[:10]:
-            verify_location = geoapify_verify_location(spot.name, city)
-            if verify_location is False:
-                continue
-            lat = verify_location.get("lat")
-            lon = verify_location.get("lon")
-            for zone in plan_results:
-                verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
-                if verify_zone is True:
-                    foodie_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
-                    break
+            warnings.warn(f"Agent Foodie: \n First extraction results \n \n {extracted}")
 
+            for spot in extracted.spots[:10]:
+                verify_location = geoapify_verify_location(spot.name, city)
+                if verify_location is False:
+                    warnings.warn(f"{spot.name} not found in {city}; skipped this eaterie!")
+                    continue
+                lat = verify_location.get("lat")
+                lon = verify_location.get("lon")
+                for zone in plan_results:
+                    if lat and lon >1 :
+                        verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
+                        if verify_zone is True:
+                            foodie_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
+                            break
+
+    warnings.warn(f"Agent Foodie : \n \n Only first ten results are kept from the following : {unique_spots}.")
     return {        
         "foodie_results": foodie_places,
         "messages": [
@@ -273,32 +284,39 @@ def agent_events(state: TravelState)-> Dict[str, Any]:
     """
     extracted = llm_spots.invoke(extraction_prompt)
 
-    seen_names = set()
-    unique_spots = []
+    if extracted is None:
+        warnings.warn(f"LLM at Agent Events failed to return structured output matching the ExtractedSpots schema. No events gathered.")
+    else:
+        seen_names = set()
+        unique_spots = []
 
-    for spot in extracted.spots:
-            normalized_name = spot.name.strip().lower()
+        for spot in extracted.spots:
+                normalized_name = spot.name.strip().lower()
 
-            if normalized_name not in seen_names:
-                seen_names.add(normalized_name)
-                unique_spots.append(zone)
+                if normalized_name not in seen_names:
+                    seen_names.add(normalized_name)
+                    unique_spots.append(spot)
 
-    extracted.spots = unique_spots
+        extracted.spots = unique_spots
 
-    for spot in extracted.spots[:5]:
-        verify_location = geoapify_verify_location(spot.name, city)
-        if verify_location is False:
-            continue
-        lat = verify_location.get("lat")
-        lon = verify_location.get("lon")
-        for zone in plan_results:
-            if lat and lon:
-                verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
-                if verify_zone is True:
-                    events_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
-                else:
-                    events_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": False, "summary": spot.summary})
+        warnings.warn(f"Agent Events: \n First extraction results \n \n {extracted}")
 
+        for spot in extracted.spots[:5]:
+            verify_location = geoapify_verify_location(spot.name, city)
+            if verify_location is False:
+                warnings.warn(f"{spot.name} not found in {city}; skipped this event!")
+                continue
+            lat = verify_location.get("lat")
+            lon = verify_location.get("lon")
+            for zone in plan_results:
+                if lat and lon >1 :
+                    verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
+                    if verify_zone is True:
+                        events_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
+                    else:
+                        events_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": False, "summary": spot.summary})
+
+    warnings.warn(f"Agent Events : \n \n Only first five results are kept from the following : {unique_spots}.")
     return {        
         "events_results": events_places,
         "messages": [
@@ -328,30 +346,39 @@ def agent_sights(state: TravelState)-> Dict[str, Any]:
         """
         extracted = llm_spots.invoke(extraction_prompt)
 
-        seen_names = set()
-        unique_spots = []
+        if extracted is None:
+            warnings.warn(f"LLM at Agent Sights failed to return structured output matching the ExtractedSpots schema. No sights gathered in zone {zone_name}")
+            continue
+        else:
+            seen_names = set()
+            unique_spots = []
 
-        for spot in extracted.spots:
-                normalized_name = spot.name.strip().lower()
-    
-                if normalized_name not in seen_names:
-                    seen_names.add(normalized_name)
-                    unique_spots.append(zone)
+            for spot in extracted.spots:
+                    normalized_name = spot.name.strip().lower()
+        
+                    if normalized_name not in seen_names:
+                        seen_names.add(normalized_name)
+                        unique_spots.append(spot)
 
-        extracted.spots = unique_spots
+            extracted.spots = unique_spots
 
-        for spot in extracted.spots[:5]:
-            verify_location = geoapify_verify_location(spot.name, city)
-            if verify_location is False:
-                continue
-            lat = verify_location.get("lat")
-            lon = verify_location.get("lon")
-            for zone in plan_results:
-                verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
-                if verify_zone is True:
-                    sights_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
-                    break
+            warnings.warn(f"Agent Sights: \n First extraction results \n \n {extracted}")
 
+            for spot in extracted.spots[:5]:
+                verify_location = geoapify_verify_location(spot.name, city)
+                if verify_location is False:
+                    warnings.warn(f"{spot.name} not found in {city}; skipped this sight!")
+                    continue
+                lat = verify_location.get("lat")
+                lon = verify_location.get("lon")
+                for zone in plan_results:
+                    if lat and lon >1 :
+                        verify_zone = shapely_destination_in_zone(lat, lon, zone_geojson= zone["isochrome"])
+                        if verify_zone is True:
+                            sights_places.append({"name": spot.name, "address": verify_location["formatted_address"],"lat": lat, "lon": lon, "zone": zone["zone_name"], "summary": spot.summary})
+                            break
+
+    warnings.warn(f"Agent Sights : \n \n Only first five results are kept from the following : {unique_spots}.")
     return {        
         "sights_results": sights_places,
         "messages": [
@@ -369,80 +396,103 @@ def agent_sights(state: TravelState)-> Dict[str, Any]:
 
 class SpotDetails(BaseModel):
     name: str = Field(description="Name of the zone, landmark, or business")
-    address: str = Field(description="Address of the location") #################################################################################
-    lat: float = Field(description= "The latitude coordinate of the address given as a float.", default = 69.647576) #########################################
-    lon: float = Field(description= "The longitude coordinate of the address given as a float.", default = 18.95236)#############################################
     opening_hours: str = Field(description="Hours of operation for the location.")
     avg_time_spent: str = Field(description="Average time spent at location.")
     best_time: str = Field(description="Best time of day to visit.")
-    type:  str = Field(description="Type of location (cafe, restaurant, event, sight)")
-    recommender_notes: str = Field(description="Summary of what online users say about this location.") #######################################################
-    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.")###########################
-
-class Spots_Detailed(BaseModel):
-    spots_interest: List[SpotDetails] = Field(description="List of locations of interest, with important planning information.")
-
+    address: str = Field(description="Street address of the location")
+    
 class ItineraryItems(BaseModel):
     day: int = Field(description="Day of the trip")
-    time_slot: str = Field(description="The approximate time (in military hours) when this item will be visited")
+    time_slot: str = Field(description="The approximate time frame (in military hours) when this item will be visited")
     name: str = Field(description="Name of the zone, landmark, or business")
-    address: str = Field(description="Address of the location") ###############################################################################
-    recommender_notes: str = Field(description="Verbatim summary from the recommender agents") ###########################################################3
-    type: str = Field(description="Type of location (cafe, restaurant, event, sight)")
-    zone: Union[str, bool] = Field(description="The name of the zone of interest this falls into, or False if it is outside the bounds of any zone.") ###########################################
-    transit_next_mode: str = Field(description="The mode of transport used to reach the next destination.") #################################################
-    transit_next_directions: str = Field(description="The transit directions to reach the next destination.")#####################################################
-    transit_next_duration: int = Field(description="The estimated transit time to reach the next destination.")#################################################################
-
+    travel_time: int = Field(description="Transit time to reach the next point on the itinerary. If items are in the same zone, return zero.")
+    address: str = Field(description="Street address of the location")
 
 class Itinerary(BaseModel):
     items: List[ItineraryItems] = Field(description="List in chronological order of itinerary destinations.")
 
-llm_items = llm.with_structured_output(Spots_Detailed)
+llm_items = llm.with_structured_output(SpotDetails)
 llm_itinerary = llm.with_structured_output(Itinerary)
 
 def agent_itinerary(state: TravelState) -> Dict[str, Any]:
-    user_query = state.get("user_query")
+    city = state.get("location")
+    country = state.get("country")
+    dates = state.get("dates")
     plan_results = state.get("plan_results", {})
     event_results = state.get("events_results")
     foodie_results = state.get("foodie_results")
     sights_results = state.get("sights_results")
-    hotel_address = state.get("hotel_address")
     hotel_lat = state.get("hotel_lat")
     hotel_lon = state.get("hotel_lon")
-    extraction_prompt = f"""
-    Analyze the following locations {event_results}, {foodie_results}, and {sights_results}.
-    Identify the opening hours, average time spent, and best time of day to visit.
-    Take note of which zone they belong to and group activities in each zone together.
-    Use {plan_results}, {event_results}, {foodie_results}, {sights_results}, to provide the recommender notes about each location (verbatim).
-    Determine which type of location it is (cafe, restaurant, event, sight). ###############################################################################################3
-    """
-    extracted: Spots_Detailed = llm_items.invoke(extraction_prompt)
+
+    foodie_details = []
+    for spot in foodie_results:
+        extraction_prompt = f"""
+        Analyze the following : {spot}
+        Identify the opening hours, average time spent, and best time of day to visit.
+        Include the street address provided in {spot}
+        """
+        extracted = llm_items.invoke(extraction_prompt)
+        foodie_details.append({"foodie_results": foodie_results, "details": extracted})
+
+    event_details = []
+    for spot in event_results:
+        extraction_prompt = f"""
+        Analyze the following : {spot}
+        Identify the opening hours, average time spent, and best time of day to visit.
+        Include the street address provided in {spot}
+        """
+        extracted = llm_items.invoke(extraction_prompt)
+        event_details.append({"event_results": event_results, "details": extracted})
+
+    sight_details = []
+    for spot in sights_results:
+        extraction_prompt = f"""
+        Analyze the following : {spot}
+        Identify the opening hours, average time spent, and best time of day to visit.
+        Include the street address provided in {spot}
+        """
+        extracted = llm_items.invoke(extraction_prompt)
+        sight_details.append({"sight_results": sights_results, "details": extracted})
+    
+    warnings.warn(f"Agent Itinerary detailed examination found the following: \n\n {foodie_details} \n\n {event_details} \n\n {sight_details}")
 
     routing_destinations = []
     zones = [z["coordinates"] for z in plan_results]
     for zone in zones:
         lat = zone['lat']
         lon = zone['lon']
-        routing_destinations.append((lat,lon))
+        routing_destinations.append({"coordinates": (lat,lon), "name": "zone"})
 
-    for spot in extracted.spots_interest:
-        if spot.zone is False or spot.zone == "False":
-            routing_destinations.append((spot.lat, spot.lon))
-    routing_destinations.append((hotel_lat, hotel_lon))
+    routing_destinations.append({"coordinates": (hotel_lat, hotel_lon), "name": "hotel"})
 
+    for spot in foodie_results:
+        if spot['zone'] is False or spot['zone'] == "False":
+            routing_destinations.append({"coordinates":(spot['lat'], spot['lon']), "name": spot['name']})
+    
+    for spot in event_results:
+        if spot['zone'] is False or spot['zone'] == "False":
+            routing_destinations.append({"coordinates":(spot['lat'], spot['lon']), "name": spot['name']})
+    
+    for spot in sights_results:
+        if spot['zone'] is False or spot['zone'] == "False":
+            routing_destinations.append({"coordinates":(spot['lat'], spot['lon']), "name": spot['name']})
+    
     routes = []
     for origin in routing_destinations:
         others = [dest for dest in routing_destinations if dest != origin]
         for other in others:
-            route = ors_routing(origin = origin, destination = other)
-            routes.append(route)
+            route = ors_routing(origin = origin['coordinates'], destination = other['coordinates'])
+            routes.append({"route": route, "origin": origin['name'], "destination": other['name']})
+
+    warnings.warn(f"Routes looks like this: \n\n {routes}")
 
     extraction_prompt_itinerary = f"""
-    Determine an optimized itinerary for the vacation defined in {user_query}.  #######################################################################################################
-    Start and end each day in the hotel at {hotel_address}.
-    Use the locations of interest in {extracted.model_dump()} along with their hours of operation, best times to visit, and the zones they belong to. 
+    Determine an optimized itinerary for vacation in {city}, {country} during {dates}.
+    Start and end each day in the hotel.
+    Use the locations of interest in {foodie_details}, {event_details}, and {sight_details}. Group items by their zone to reduce travel time.
     Take note of transit times {routes} between zones and independent destinations.
+    Include the street address provided for each location in the itinerary.
     """
     itinerary: Itinerary = llm_itinerary.invoke(extraction_prompt_itinerary)
 
@@ -463,7 +513,6 @@ def agent_itinerary(state: TravelState) -> Dict[str, Any]:
 
 def agent_assistant(state: TravelState) -> Dict[str, Any]:
     itinerary = state.get("itinerary_results", {})
-    user_query = state.get("user_query")
     plans = state.get("plan_results")
     foodie = state.get("foodie_results")
     events = state.get("events_results")
@@ -477,8 +526,8 @@ def agent_assistant(state: TravelState) -> Dict[str, Any]:
 
     map_url = geoapify_map(destinations= destinations)
     extraction_prompt = f"""
-    You are a local travel expert, providing a beautiful travel itinerary based on {user_query}.
-    The itinerary is  {itinerary}. More detailed thoughts on each location can be found in {plans}, {foodie}, {events}, and {sights}.
+    You are a local travel expert, providing a beautiful travel itinerary.
+    The itinerary is {itinerary}. More detailed thoughts on each location can be found in {plans}, {foodie}, {events}, and {sights}.
     """
     assistant_results = llm.invoke(extraction_prompt)
 
@@ -570,6 +619,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
             "location": "",
             "language": "",
             "country": "",
+            "dates": "",
             "hotel_address": "",
             "hotel_lat": 0,
             "hotel_lon": 0,
@@ -590,6 +640,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
         "location": result.get("location"),
         "language": result.get("language"),
         "country": result.get("country"),
+        "dates": result.get("dates"),
         "hotel_address": result.get("hotel_address"),
         "hotel_lat": result.get("hotel_lat"),
         "hotel_lon": result.get("hotel_lon"),
