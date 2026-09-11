@@ -518,13 +518,13 @@ def agent_assistant(state: TravelState) -> Dict[str, Any]:
     events = state.get("events_results")
     sights = state.get("sights_results")
 
-    if isinstance(itinerary, dict):
-        items = itinerary.get("items", [])
-        destinations = [item["address"] for item in items if "address" in item]
-    else:
-        destinations = [item.address for item in itinerary.items]
+    # if isinstance(itinerary, dict):
+    #     items = itinerary.get("items", [])
+    #     destinations = [item["address"] for item in items if "address" in item]
+    # else:
+    #     destinations = [item.address for item in itinerary.items]
 
-    map_url = geoapify_map(destinations= destinations)
+    # map_url = geoapify_map(destinations= destinations)
     extraction_prompt = f"""
     You are a local travel expert, providing a beautiful travel itinerary.
     The itinerary is {itinerary}. More detailed thoughts on each location can be found in {plans}, {foodie}, {events}, and {sights}.
@@ -532,7 +532,8 @@ def agent_assistant(state: TravelState) -> Dict[str, Any]:
     assistant_results = llm.invoke(extraction_prompt)
 
     content_text = getattr(assistant_results, "content", str(assistant_results))
-    Final_Message = f"Find the annotated map here: \n {map_url} \n\n Local Travel Expert Message: \n\n {content_text}"
+    Final_Message = f"Local Travel Expert Message: \n\n {content_text}"
+    # Final_Message = f"Find the annotated map here: \n {map_url} \n\n Local Travel Expert Message: \n\n {content_text}"
     return {
         "final_results": Final_Message,
         "messages": [AIMessage(content=f"Successfully generated final travel agent message. Bon voyage!")],
