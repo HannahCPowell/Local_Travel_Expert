@@ -101,9 +101,6 @@ def agent_parser(state: TravelState) -> Dict[str, Any]:
 
     hotel_coordinates = ors_geocode(address = extracted_data.hotel_address, country = extracted_data.country)
 
-    if hotel_coordinates[0] or hotel_coordinates[1] <1 :
-        warnings.warn(f"Hotel coordinates could not be generated. Coordinates : {hotel_coordinates}, extracted : {extracted_data}")
-
     warnings.warn(f"Agent Parser : \n Hotel coordinates are {hotel_coordinates}. \n Extracted data: \n {extracted_data}.")
     return {
         "location": extracted_data.city,

@@ -3,7 +3,7 @@
 
 ## Description
 
-This is a milti-agent AI tool built with LangSmith which helps the user to plan a trip based on local search results. The recommendation agents use geographic and language markers from the destination to find unique ideas. These are ideas are considered along the map to create the most culturally-packed route possible. A supervisor agent manages the ideas and packages a final message along with an annotated map to give you the best travel experience possible.
+This is a multi-agent AI tool built with LangChain which helps the user to plan a trip based on local search results. The recommendation agents use geographic and language markers from the destination to find unique ideas. These are ideas are considered along the map to create the most culturally-packed route possible. A supervisor agent manages the ideas and packages a final message to give you the best travel experience possible.
 
 ## Getting Started
 
@@ -15,9 +15,23 @@ You will need to have API keys generated for the following services:
 * SerpAPI
 * Google Maps API
 * OpenRouteService
-* OpenAI
+* OpenRouter
 
 A PostgreSQL server hosted by Render is connected to local pgAdmin, and the database URL is added to the .env file.
+
+Here is a sample of the .env file contents:
+```bash
+ORS_API_KEY = "Your key"
+GEOAPIFY_KEY = "Your key"
+EXA_API_KEY = ""
+SERPAPI_API_KEY = ""
+DATABASE_URL = ""
+LANGSMITH_PROJECT = ""
+LANGSMITH_API_KEY = ""
+LANGSMITH_TRACING = "true"
+LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+OPENROUTER_API_KEY = ""
+```
 
 ### Installing
 
@@ -42,18 +56,13 @@ pip install -r requirements.txt
 
 ### Executing program
 
-* How to run the program
-* Step-by-step bullets
-```
-code blocks for commands
-```
+Initialize the API
 
-## Help
-
-Any advise for common problems or issues.
+```bash
+python ./app.py
 ```
-command to run if program contains helper info
-```
+Follow the provided link to your local host server, and provide input to the agent.
+Two example inputs are available in the 'Norway' and 'Spain' buttons.
 
 ## Authors
 
